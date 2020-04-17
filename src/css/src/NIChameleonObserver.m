@@ -31,9 +31,9 @@ static const NSTimeInterval kTimeoutInterval = 1000;
 static const NSTimeInterval kRetryInterval = 10000;
 static const NSInteger kMaxNumberOfRetries = 3;
 
-NSString* const NIJSONDidChangeNotification = @"NIJSONDidChangeNotification";
-NSString* const NIJSONDidChangeFilePathKey = @"NIJSONPathKey";
-NSString* const NIJSONDidChangeNameKey = @"NIJSONNameKey";
+NSString* const NIGenericResourceDidChangeNotification = @"NIGenericResourceDidChangeNotification";
+NSString* const NIGenericResourceDidChangeFilePathKey = @"NIGenericResourcePathKey";
+NSString* const NIGenericResourceDidChangeNameKey = @"NIGenericResourceNameKey";
 
 @interface NIChameleonObserver() <
     NSNetServiceBrowserDelegate,
@@ -159,9 +159,9 @@ NSString* const NIJSONDidChangeNameKey = @"NIJSONNameKey";
     [responseObject writeToFile:diskPath atomically:YES];
 
     NSNotificationCenter* nc = [NSNotificationCenter defaultCenter];
-    [nc postNotificationName:NIJSONDidChangeNotification object:nil
-                    userInfo:@{NIJSONDidChangeFilePathKey: diskPath,
-                               NIJSONDidChangeNameKey: path}];
+    [nc postNotificationName:NIGenericResourceDidChangeNotification object:nil
+                    userInfo:@{NIGenericResourceDidChangeFilePathKey: diskPath,
+                               NIGenericResourceDidChangeNameKey: path}];
   } failure:nil];
 }
 

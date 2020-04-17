@@ -27,12 +27,19 @@
     if (self.placeholderTextColor) {
       [self.placeholderTextColor setFill];
     }
+      
+    UIFont *font = (self.placeholderFont != nil ? self.placeholderFont : self.font);
 
-    [self.placeholder drawInRect:rect
-                        withFont:(self.placeholderFont != nil ? self.placeholderFont : self.font)
-                   lineBreakMode:NSLineBreakByClipping
-                       alignment:self.textAlignment];
+    NSMutableParagraphStyle *style = [[NSParagraphStyle defaultParagraphStyle] mutableCopy];
+    /// Set line break mode
+    style.lineBreakMode = NSLineBreakByClipping;
+    /// Set text alignment
+    style.alignment = self.textAlignment;
 
+    NSDictionary *attributes = @{ NSFontAttributeName: font,
+                        NSParagraphStyleAttributeName: style };
+
+    [self.placeholder drawInRect:rect withAttributes:attributes];
     CGContextRestoreGState(cx);
 
   } else {

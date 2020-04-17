@@ -15,9 +15,13 @@
 //
 
 #import "NICSSRuleset.h"
+#import "NIStylesheet.h"
 
 #import "NICSSParser.h"
 #import "NimbusCore.h"
+
+@implementation NICSSRelativeSpec
+@end
 
 // TODO selected/highlighted states for buttons
 
@@ -25,43 +29,13 @@
 #error "Nimbus requires ARC support."
 #endif
 
-static NSString* const kTextColorKey = @"color";
-static NSString* const kHighlightedTextColorKey = @"-ios-highlighted-color";
-static NSString* const kTextAlignmentKey = @"text-align";
-static NSString* const kFontKey = @"font";
-static NSString* const kFontSizeKey = @"font-size";
-static NSString* const kFontStyleKey = @"font-style";
-static NSString* const kFontWeightKey = @"font-weight";
-static NSString* const kFontFamilyKey = @"font-family";
-static NSString* const kTextShadowKey = @"text-shadow";
-static NSString* const kLineBreakModeKey = @"-ios-line-break-mode";
-static NSString* const kNumberOfLinesKey = @"-ios-number-of-lines";
-static NSString* const kMinimumFontSizeKey = @"-ios-minimum-font-size";
-static NSString* const kAdjustsFontSizeKey = @"-ios-adjusts-font-size";
-static NSString* const kBaselineAdjustmentKey = @"-ios-baseline-adjustment";
-static NSString* const kOpacityKey = @"opacity";
-static NSString* const kBackgroundColorKey = @"background-color";
-static NSString* const kBorderRadiusKey = @"border-radius";
-static NSString* const kBorderKey = @"border";
-static NSString* const kBorderColorKey = @"border-color";
-static NSString* const kBorderWidthKey = @"border-width";
-static NSString* const kTintColorKey = @"-ios-tint-color";
-static NSString* const kActivityIndicatorStyleKey = @"-ios-activity-indicator-style";
-static NSString* const kAutoresizingKey = @"-ios-autoresizing";
-static NSString* const kTableViewCellSeparatorStyleKey = @"-ios-table-view-cell-separator-style";
-static NSString* const kScrollViewIndicatorStyleKey = @"-ios-scroll-view-indicator-style";
-static NSString* const kPaddingKey = @"padding";
-static NSString* const kHPaddingKey = @"-mobile-hpadding";
-static NSString* const kVPaddingKey = @"-mobile-vpadding";
-
-// This color table is generated on-demand and is released when a memory warning is encountered.
-static NSDictionary* sColorTable = nil;
-
 @interface NICSSRuleset()
 // Instantiates the color table if it does not already exist.
 + (NSDictionary *)colorTable;
 + (UIColor *)colorFromCssValues:(NSArray *)cssValues numberOfConsumedTokens:(NSInteger *)pNumberOfConsumedTokens;
 + (NSTextAlignment)textAlignmentFromCssValues:(NSArray *)cssValues;
+
+@property (nonatomic) BOOL registeredOnNotificationCenter;
 @end
 
 
@@ -82,36 +56,84 @@ return _##name; \
 
 @implementation NICSSRuleset
 
-
-- (void)dealloc {
-  [[NSNotificationCenter defaultCenter] removeObserver:self];
++(void)initialize {
+    [super initialize];
+    sKnownKeys = [NSSet setWithObjects:
+                  kTextColorKey, kHighlightedTextColorKey,
+                  kTextAlignmentKey, kTextAlignmentKey, kFontKey, kFontSizeKey,
+                  kFontStyleKey, kFontWeightKey, kFontFamilyKey, kTextShadowKey,
+                  kLineBreakModeKey, kNumberOfLinesKey, kMinimumFontSizeKey, kAdjustsFontSizeKey,
+                  kBaselineAdjustmentKey, kOpacityKey, kBackgroundColorKey, kBorderRadiusKey,
+                  kBorderKey, kBorderColorKey, kBorderWidthKey, kTintColorKey,
+                  kActivityIndicatorStyleKey, kAutoresizingKey,
+                  kTableViewCellSeparatorStyleKey, kScrollViewIndicatorStyleKey,
+                  kPaddingKey, kHPaddingKey, kVPaddingKey, kWidthKey,
+                  kHeightKey, kTopKey, kBottomKey, kRightKey,
+                  kLeftKey, kMinWidthKey, kMinHeightKey, kMaxWidthKey,
+                  kMaxHeightKey, kFrameHorizontalAlignKey,
+                  kFrameVerticalAlignKey, kBackgroundStretchInsetsKey,
+                  kBackgroundImageKey, kImageKey, kVisibleKey, kTitleInsetsKey, kContentInsetsKey,
+                  kImageInsetsKey, kTextKeyKey, kButtonAdjustKey, kVerticalAlignKey,
+                  kHorizontalAlignKey, kReturnKeyTypeKey, kKeyboardTypeKey,
+                  kAutocorrectionTypeKey, kAutocapitalizationTypeKey, kClipsToBoundsKey,
+                  kLeftOfKey, kRightOfKey, kAboveKey, kBelowKey,
+                  nil
+                  ];
 }
+
++(NSSet *)knownCssProperties {
+    return sKnownKeys;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+- (void)dealloc {
+    if (self.registeredOnNotificationCenter) {
+        [[NSNotificationCenter defaultCenter] removeObserver:self];
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
 
 - (id)init {
   if ((self = [super init])) {
     _ruleset = [[NSMutableDictionary alloc] init];
-
-    NSNotificationCenter* nc = [NSNotificationCenter defaultCenter];
-    [nc addObserver: self
-           selector: @selector(didReceiveMemoryWarning:)
-               name: UIApplicationDidReceiveMemoryWarningNotification
-             object: nil];
   }
   return self;
+}
+
+- (id)initAndRegisterForMemoryWarnings {
+    if ((self = [self init])) {
+        NSNotificationCenter* nc = [NSNotificationCenter defaultCenter];
+        [nc addObserver: self
+               selector: @selector(didReceiveMemoryWarning:)
+                   name: UIApplicationDidReceiveMemoryWarningNotification
+                 object: nil];
+        self.registeredOnNotificationCenter = YES;
+    }
+    return self;
 }
 
 #pragma mark - Public
 
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
+- (void)reset {
+  [self reduceMemory];
+  [_ruleset removeAllObjects];
+}
+///////////////////////////////////////////////////////////////////////////////////////////////////
 - (void)addEntriesFromDictionary:(NSDictionary *)dictionary {
-  NSMutableArray* order = [_ruleset objectForKey:kPropertyOrderKey];
+  NSMutableArray* oldOrder = [_ruleset objectForKey:kPropertyOrderKey] ?: [NSMutableArray array];
+  NSMutableArray* newOrder = [dictionary objectForKey:kPropertyOrderKey];
+
   [_ruleset addEntriesFromDictionary:dictionary];
 
-  if (nil != order) {
-    [order addObjectsFromArray:[dictionary objectForKey:kPropertyOrderKey]];
-    [_ruleset setObject:order forKey:kPropertyOrderKey];
-  }
+  [oldOrder addObjectsFromArray:newOrder];
+
+  [_ruleset setObject:oldOrder forKey:kPropertyOrderKey];
 }
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
 
 -(id)cssRuleForKey:(NSString *)key
 {
@@ -581,6 +603,10 @@ RULE_ELEMENT(minWidth, MinWidth, @"min-width", NICSSUnit, unitFromCssValues)
 RULE_ELEMENT(minHeight, MinHeight, @"min-height", NICSSUnit, unitFromCssValues)
 RULE_ELEMENT(maxWidth, MaxWidth, @"max-width", NICSSUnit, unitFromCssValues)
 RULE_ELEMENT(maxHeight, MaxHeight, @"max-height", NICSSUnit, unitFromCssValues)
+RULE_ELEMENT(leftOf, LeftOf, @"-mobile-left-of", NICSSRelativeSpec*, relativeSpecFromCssValues)
+RULE_ELEMENT(rightOf, RightOf, @"-mobile-right-of", NICSSRelativeSpec*, relativeSpecFromCssValues)
+RULE_ELEMENT(above, Above, @"-mobile-above", NICSSRelativeSpec*, relativeSpecFromCssValues)
+RULE_ELEMENT(below, Below, @"-mobile-below", NICSSRelativeSpec*, relativeSpecFromCssValues)
 RULE_ELEMENT(frameHorizontalAlign,FrameHorizontalAlign,@"-mobile-halign",NSTextAlignment,textAlignmentFromCssValues)
 RULE_ELEMENT(frameVerticalAlign,FrameVerticalAlign,@"-mobile-valign",UIViewContentMode,verticalAlignFromCssValues)
 RULE_ELEMENT(backgroundStretchInsets,BackgroundStretchInsets,@"-mobile-background-stretch",UIEdgeInsets,edgeInsetsFromCssValues)
@@ -599,6 +625,12 @@ RULE_ELEMENT(textKey, TextKey, @"-mobile-text-key", NSString*, stringFromCssValu
 RULE_ELEMENT(buttonAdjust, ButtonAdjust, @"-ios-button-adjust", NICSSButtonAdjust, buttonAdjustFromCssValue)
 RULE_ELEMENT(verticalAlign, VerticalAlign, @"-mobile-content-valign", UIControlContentVerticalAlignment, controlVerticalAlignFromCssValues)
 RULE_ELEMENT(horizontalAlign, HorizontalAlign, @"-mobile-content-halign", UIControlContentHorizontalAlignment, controlHorizontalAlignFromCssValues)
+RULE_ELEMENT(returnKeyType, ReturnKeyType, @"-mobile-return-key", UIReturnKeyType, returnKeyFromCssValues)
+RULE_ELEMENT(keyboardType, KeyboardType, @"-mobile-keyboard", UIKeyboardType, keyboardTypeFromCssValues)
+RULE_ELEMENT(autocorrectionType, AutocorrectionType, @"-mobile-autocorrection", UITextAutocorrectionType, autocorrectionFromCssValues)
+RULE_ELEMENT(autocapitalizationType, AutocapitalizationType, @"-mobile-autocapitalization", UITextAutocapitalizationType, autocapitalizationFromCssValues)
+RULE_ELEMENT(clipsToBounds, ClipsToBounds, @"-mobile-overflow", BOOL, overflowFromCssValues)
+RULE_ELEMENT(accessibilityTraits, AccessibilityTraits, @"-mobile-accessibility-traits", UIAccessibilityTraits, traitsFromCssValues)
 
 - (BOOL)hasTintColor {
   return nil != [_ruleset objectForKey:kTintColorKey];
@@ -966,13 +998,26 @@ RULE_ELEMENT(horizontalAlign, HorizontalAlign, @"-mobile-content-halign", UICont
   } else if ([unitValue hasSuffix:@"px"]) {
     returnUnits.type = CSS_PIXEL_UNIT;
     returnUnits.value = [NSDecimalNumber decimalNumberWithString: [unitValue substringToIndex:unitValue.length-1]].floatValue;
-  } else if ([unitValue isEqualToString:@"0"]) {
-    returnUnits.type = CSS_PIXEL_UNIT;
-    returnUnits.value = 0;
   } else {
-    NIDERROR(@"Unknown unit: %@", unitValue);
+      returnUnits.type = CSS_PIXEL_UNIT;
+      returnUnits.value = 0;
   }
   return returnUnits;
+}
+
++(NICSSRelativeSpec *)relativeSpecFromCssValues:(NSArray*)cssValues
+{
+  NICSSUnit margin;
+  if ([cssValues count] == 1) {
+    margin.type = CSS_PIXEL_UNIT;
+    margin.value = 0;
+  } else {
+    margin = [self unitFromCssValues:cssValues offset:1];
+  }
+  NICSSRelativeSpec *spec = [NICSSRelativeSpec new];
+  spec.viewSpec = [cssValues objectAtIndex:0];
+  spec.margin = margin;
+  return spec;
 }
 
 +(UIViewContentMode) verticalAlignFromCssValues:(NSArray*)cssValues
@@ -1022,6 +1067,11 @@ RULE_ELEMENT(horizontalAlign, HorizontalAlign, @"-mobile-content-halign", UICont
     NIDERROR(@"Unknown content horizontal alignment: %@", unitValue);
     return UIControlContentHorizontalAlignmentCenter;
   }
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
++ (UIColor*) colorFromString: (NSString*) colorValue {
+  return [self colorFromCssValues:[NSArray arrayWithObject:colorValue] numberOfConsumedTokens:nil];
 }
 
 + (UIColor *)colorFromCssValues:(NSArray *)cssValues numberOfConsumedTokens:(NSInteger *)pNumberOfConsumedTokens {
@@ -1091,6 +1141,16 @@ RULE_ELEMENT(horizontalAlign, HorizontalAlign, @"-mobile-content-halign", UICont
     return NO;
   }
   return YES;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
++(BOOL)overflowFromCssValues: (NSArray*) values
+{
+  NSString *v = [values objectAtIndex:0];
+  if ([v caseInsensitiveCompare:@"hidden"] == NSOrderedSame) {
+    return YES;
+  }
+  return NO;
 }
 
 +(NSString*)imageStringFromCssValues:(NSArray*) cssValues
@@ -1179,6 +1239,89 @@ RULE_ELEMENT(horizontalAlign, HorizontalAlign, @"-mobile-content-halign", UICont
   }
 
   return textAlignment;
+}
+
+#define ENUM_CHECK(s,e) if ([value isEqualToString:s]) { return e; }
++(UIReturnKeyType) returnKeyFromCssValues: (NSArray*) cssValues {
+  NSString *value = [cssValues objectAtIndex:0];
+  ENUM_CHECK(@"default",UIReturnKeyDefault);
+  ENUM_CHECK(@"go",UIReturnKeyGo);
+  ENUM_CHECK(@"google",UIReturnKeyGoogle);
+  ENUM_CHECK(@"join",UIReturnKeyJoin);
+  ENUM_CHECK(@"next",UIReturnKeyNext);
+  ENUM_CHECK(@"route",UIReturnKeyRoute);
+  ENUM_CHECK(@"search",UIReturnKeySearch);
+  ENUM_CHECK(@"send",UIReturnKeySend);
+  ENUM_CHECK(@"yahoo",UIReturnKeyYahoo);
+  ENUM_CHECK(@"done",UIReturnKeyDone);
+  ENUM_CHECK(@"emergencycall",UIReturnKeyEmergencyCall);
+  NIDERROR(@"Unknown return key type %@", value);
+  return UIReturnKeyDefault;
+}
+
++(UIKeyboardType) keyboardTypeFromCssValues: (NSArray*) cssValues {
+  NSString *value = [cssValues objectAtIndex:0];
+  ENUM_CHECK(@"default",UIKeyboardTypeDefault);
+  ENUM_CHECK(@"ascii",UIKeyboardTypeASCIICapable);
+  ENUM_CHECK(@"numbersandpunctuation",UIKeyboardTypeNumbersAndPunctuation);
+  ENUM_CHECK(@"url",UIKeyboardTypeURL);
+  ENUM_CHECK(@"number",UIKeyboardTypeNumberPad);
+  ENUM_CHECK(@"phone",UIKeyboardTypePhonePad);
+  ENUM_CHECK(@"namephone",UIKeyboardTypeNamePhonePad);
+  ENUM_CHECK(@"email",UIKeyboardTypeEmailAddress);
+  ENUM_CHECK(@"decimal",UIKeyboardTypeDecimalPad);
+  ENUM_CHECK(@"twitter",UIKeyboardTypeTwitter);
+  ENUM_CHECK(@"search",UIKeyboardTypeWebSearch);
+  NIDERROR(@"Unknown keyboard type %@", value);
+  return UIKeyboardTypeDefault;
+}
+
++(UITextAutocorrectionType) autocorrectionFromCssValues: (NSArray*) cssValues {
+  NSString *value = [cssValues objectAtIndex:0];
+  ENUM_CHECK(@"default", UITextAutocorrectionTypeDefault);
+  ENUM_CHECK(@"no", UITextAutocorrectionTypeNo);
+  ENUM_CHECK(@"yes", UITextAutocorrectionTypeYes);
+  NIDERROR(@"Unknown autocorrection type %@", value);
+  return UITextAutocorrectionTypeDefault;
+}
+
++(UITextAutocapitalizationType) autocapitalizationFromCssValues: (NSArray*) cssValues {
+  NSString *value = [cssValues objectAtIndex:0];
+  ENUM_CHECK(@"none", UITextAutocapitalizationTypeNone);
+  ENUM_CHECK(@"words", UITextAutocapitalizationTypeWords);
+  ENUM_CHECK(@"sentences", UITextAutocapitalizationTypeSentences);
+  ENUM_CHECK(@"all", UITextAutocapitalizationTypeAllCharacters);
+  NIDERROR(@"Unknown autocapitalization type %@", value);
+  return UITextAutocapitalizationTypeNone;
+}
+
+#define FLAG_CHECK(s,e) if ([trimmed containsObject:s]) { traits |= e; }
++(UIAccessibilityTraits) traitsFromCssValues: (NSArray*) cssValues {
+  NSArray *values = [[cssValues objectAtIndex:0] componentsSeparatedByString:@","];
+  NSMutableSet *trimmed = [[NSMutableSet alloc] initWithCapacity:values.count];
+  [values enumerateObjectsUsingBlock:^(NSString* value, NSUInteger idx, BOOL *stop) {
+    [trimmed addObject: [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]];
+  }];
+  
+  UIAccessibilityTraits traits = UIAccessibilityTraitNone;
+  FLAG_CHECK(@"none", UIAccessibilityTraitNone);
+  FLAG_CHECK(@"adjustable", UIAccessibilityTraitAdjustable);
+  FLAG_CHECK(@"allowsdirectinteraction", UIAccessibilityTraitAllowsDirectInteraction);
+  FLAG_CHECK(@"button", UIAccessibilityTraitButton);
+  FLAG_CHECK(@"causespageturn", UIAccessibilityTraitCausesPageTurn);
+  FLAG_CHECK(@"header", UIAccessibilityTraitHeader);
+  FLAG_CHECK(@"image", UIAccessibilityTraitImage);
+  FLAG_CHECK(@"keyboardkey", UIAccessibilityTraitKeyboardKey);
+  FLAG_CHECK(@"link", UIAccessibilityTraitLink);
+  FLAG_CHECK(@"notEnabled", UIAccessibilityTraitNotEnabled);
+  FLAG_CHECK(@"playsSound", UIAccessibilityTraitPlaysSound);
+  FLAG_CHECK(@"searchField", UIAccessibilityTraitSearchField);
+  FLAG_CHECK(@"selected", UIAccessibilityTraitSelected);
+  FLAG_CHECK(@"startsmediasession", UIAccessibilityTraitStartsMediaSession);
+  FLAG_CHECK(@"statictext", UIAccessibilityTraitStaticText);
+  FLAG_CHECK(@"summaryelement", UIAccessibilityTraitSummaryElement);
+  FLAG_CHECK(@"updatesfrequently", UIAccessibilityTraitUpdatesFrequently);
+  return traits;
 }
 
 -(NSString *)description

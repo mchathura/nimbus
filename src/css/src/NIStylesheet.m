@@ -1,5 +1,5 @@
 //
-// Copyright 2011-2014 NimbusKit
+// Copyright 2011 Jeff Verkoeyen
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,44 +20,50 @@
 #import "NICSSRuleset.h"
 #import "NIStyleable.h"
 #import "NimbusCore.h"
+#import "NICSSResourceResolverDelegate.h"
+#import "NIDOM.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "Nimbus requires ARC support."
 #endif
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////
+@interface NICSSScopeDefinition : NSObject
+@property (nonatomic,strong) NSString *fullScope;
+@property (nonatomic,strong) NSArray *orderedList;
+@end
+@implementation NICSSScopeDefinition
+-(NSString *)description { return self.fullScope; }
+@end
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
 NSString* const NIStylesheetDidChangeNotification = @"NIStylesheetDidChangeNotification";
 static Class _rulesetClass;
+static id<NICSSResourceResolverDelegate> _resolver;
+
+
 
 @interface NIStylesheet()
 @property (nonatomic, readonly, copy) NSDictionary* rawRulesets;
 @property (nonatomic, readonly, copy) NSDictionary* significantScopeToScopes;
 @end
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////
 @implementation NIStylesheet
 
+@synthesize rawRulesets = _rawRulesets;
+@synthesize significantScopeToScopes = _significantScopeToScopes;
 
-
-- (void)dealloc {
-  [[NSNotificationCenter defaultCenter] removeObserver:self];
-}
-
-- (id)init {
-  if ((self = [super init])) {
-    _ruleSets = [[NSMutableDictionary alloc] init];
-
-    NSNotificationCenter* nc = [NSNotificationCenter defaultCenter];
-    [nc addObserver: self
-           selector: @selector(didReceiveMemoryWarning:)
-               name: UIApplicationDidReceiveMemoryWarningNotification
-             object: nil];
-  }
-
-  return self;
-}
-
+///////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////
 #pragma mark - Rule Sets
 
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
 // Builds a map of significant scopes to full scopes.
 //
 // For example, consider the following rulesets:
@@ -87,55 +93,69 @@ static Class _rulesetClass;
     // TODO (jverkoey Oct 6, 2011): We should respect CSS specificity. Right now this will
     // give higher precedance to newer styles. Instead, we should prefer styles that have more
     // selectors.
+    NICSSScopeDefinition *scopeDef = [[NICSSScopeDefinition alloc] init];
+    scopeDef.fullScope = scope;
+    scopeDef.orderedList = parts;
+    
     NSMutableArray* scopes = [significantScopeToScopes objectForKey:mostSignificantScopePart];
     if (nil == scopes) {
-      scopes = [[NSMutableArray alloc] initWithObjects:scope, nil];
+      scopes = [[NSMutableArray alloc] initWithObjects:scopeDef, nil];
       [significantScopeToScopes setObject:scopes forKey:mostSignificantScopePart];
       
     } else {
-      [scopes addObject:scope];
+      [scopes addObject:scopeDef];
     }
   }
+
+  // Poor mans importance sorting of selectors
+  [significantScopeToScopes enumerateKeysAndObjectsUsingBlock:^(NSString *significantScope, NSMutableArray *scopes, BOOL *stop) {
+    [scopes sortUsingComparator:^NSComparisonResult(NICSSScopeDefinition* scope1, NICSSScopeDefinition *scope2) {
+      return scope1.orderedList.count - scope2.orderedList.count;
+    }];
+  }];
 
   _significantScopeToScopes = [significantScopeToScopes copy];
 }
 
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
 - (void)ruleSetsDidChange {
   [self rebuildSignificantScopeToScopes];
 }
 
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////
 #pragma mark - NSNotifications
 
 
-- (void)reduceMemory {
-  _ruleSets = [[NSMutableDictionary alloc] init];
-}
-
-- (void)didReceiveMemoryWarning:(void*)object {
-  [self reduceMemory];
-}
-
-#pragma mark - Public
+///////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////
+#pragma mark - Public Methods
 
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
 - (BOOL)loadFromPath:(NSString *)path {
   return [self loadFromPath:path pathPrefix:nil delegate:nil];
 }
 
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
 - (BOOL)loadFromPath:(NSString *)path pathPrefix:(NSString *)pathPrefix {
   return [self loadFromPath:path pathPrefix:pathPrefix delegate:nil];
 }
 
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
 - (BOOL)loadFromPath:(NSString *)path
           pathPrefix:(NSString *)pathPrefix
             delegate:(id<NICSSParserDelegate>)delegate {
   BOOL loadDidSucceed = NO;
 
   @synchronized(self) {
+    _filePath = path;
     _rawRulesets = nil;
     _significantScopeToScopes = nil;
-
-    _ruleSets = [[NSMutableDictionary alloc] init];
 
     NICSSParser* parser = [[NICSSParser alloc] init];
 
@@ -155,6 +175,8 @@ static Class _rulesetClass;
   return loadDidSucceed;
 }
 
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
 - (void)addStylesheet:(NIStylesheet *)stylesheet {
   NIDASSERT(nil != stylesheet);
   if (nil == stylesheet) {
@@ -196,90 +218,118 @@ static Class _rulesetClass;
   }
 }
 
-- (NSString*)descriptionForView:(UIView *)view withClassName:(NSString *)className inDOM:(NIDOM *)dom andViewName:(NSString *)viewName {
-  NSMutableString *description = [[NSMutableString alloc] init];
-  NICSSRuleset *ruleset = [self rulesetForClassName:className];
-  if (nil != ruleset) {
-    NSRange r = [className rangeOfString:@":"];
-    if ([view respondsToSelector:@selector(descriptionWithRuleSet:forPseudoClass:inDOM:withViewName:)]) {
-      if (r.location != NSNotFound) {
-        [description appendString:[(id<NIStyleable>)view descriptionWithRuleSet:ruleset forPseudoClass:[className substringFromIndex:r.location+1] inDOM:dom withViewName:viewName]];
-      } else {
-        [description appendString:[(id<NIStyleable>)view descriptionWithRuleSet:ruleset forPseudoClass:nil inDOM:dom withViewName:viewName]];
-      }
-    } else {
-      [description appendFormat:@"// Description not supported for %@ with selector %@\n", view, className];
-    }
-  }
-  return description;
-}
-
+///////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////
 #pragma mark Applying Styles to Views
 
 
-- (void)applyRuleSet:(NICSSRuleset *)ruleSet toView:(UIView *)view inDOM: (NIDOM*)dom {
-  if ([view respondsToSelector:@selector(applyStyleWithRuleSet:inDOM:)]) {
-    [(id<NIStyleable>)view applyStyleWithRuleSet:ruleSet inDOM:dom];
-  }
-  if ([view respondsToSelector:@selector(applyStyleWithRuleSet:)]) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    [(id<NIStyleable>)view applyStyleWithRuleSet:ruleSet];
-#pragma clang diagnostic pop
-  }
-}
 
-- (void)applyStyleToView:(UIView *)view withClassName:(NSString *)className inDOM:(NIDOM *)dom {
-  NICSSRuleset *ruleset = [self rulesetForClassName:className];
-  if (nil != ruleset) {
-    NSRange r = [className rangeOfString:@":"];
-    if (r.location != NSNotFound && [view respondsToSelector:@selector(applyStyleWithRuleSet:forPseudoClass:inDOM:)]) {
-      [(id<NIStyleable>)view applyStyleWithRuleSet:ruleset forPseudoClass: [className substringFromIndex:r.location+1] inDOM:dom];
-    } else {
-      [self applyRuleSet:ruleset toView:view inDOM:dom];
-    }
-  }
-}
-
-- (NICSSRuleset*) addSelectors: (NSArray*) selectors toRuleset: (NICSSRuleset*) ruleSet forClassName: (NSString*) className
+///////////////////////////////////////////////////////////////////////////////////////////////////
+- (void) addRulesForSelectors: (NSArray*) selectors toRuleset:(NICSSRuleset*)ruleset
 {
-  if ([selectors count] > 0) {
-    // Gather all of the rule sets for this view into a composite rule set.
-    ruleSet = ruleSet ?: [_ruleSets objectForKey:className];
-    
-    if (nil == ruleSet) {
-      ruleSet = [[[NIStylesheet rulesetClass] alloc] init];
-      
-      // Composite the rule sets into one.
-      for (NSString* selector in selectors) {
-        [ruleSet addEntriesFromDictionary:[_rawRulesets objectForKey:selector]];
+  // Composite the rule sets into one.
+  for (NSString* selector in selectors) {
+    // TODO the array coming in is now style definitions, we need to figure out if the view being asked matches...
+    [ruleset addEntriesFromDictionary:[_rawRulesets objectForKey:selector]];
+  }
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+- (NICSSRuleset *)rulesetForClassName:(NSString *)className {
+  NICSSRuleset *ruleset = [[[[self class] rulesetClass] alloc] init];
+  [self addRulesForSelectors:@[className] toRuleset:ruleset];
+  return ruleset;
+}
+
+static NSMutableArray * matchingSelectors;
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+- (NSString *)addStylesForView:(UIView *)view withSelectors:(NSArray *)shortSelectors toRuleset:(NICSSRuleset *)ruleset inDOM:(NIDOM *)dom shouldReturnDescription:(BOOL)shouldReturnDescription {
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    matchingSelectors = [NSMutableArray array];
+  });
+  [matchingSelectors removeAllObjects];
+
+
+  for (NSString *selector in shortSelectors) {
+
+    NSArray* selectors = [_significantScopeToScopes objectForKey:selector];
+
+    for (NICSSScopeDefinition *sd in selectors) {
+      if (sd.orderedList == nil || sd.orderedList.count == 1) {
+        [matchingSelectors addObject:sd.fullScope];
+      } else {
+        // Ok, now we've got to walk the hierarchy looking for a match. lastObject is className, but the others are unknown
+        UIView *matchView = [view superview];
+        long ruleIx = ((long)sd.orderedList.count) - 2;
+        while (matchView && ruleIx >= 0) {
+          NSString *currentMatch = [sd.orderedList objectAtIndex:ruleIx];
+          BOOL mustMatch = NO;
+          if ([currentMatch isEqualToString:@">"]) {
+            ruleIx--;
+            if (ruleIx < 0) {
+              break; // > at the root. Match I suppose.
+            }
+            currentMatch = [sd.orderedList objectAtIndex:ruleIx];
+            mustMatch = YES;
+          }
+          char first = [currentMatch characterAtIndex:0];
+          BOOL isId = first == '#', isCssClass = first == '.', isObjCClass = !isId && !isCssClass;
+          if ((!isObjCClass && [dom view: matchView hasShortSelector: currentMatch]) ||
+              (isObjCClass && [NSStringFromClass([matchView class]) isEqualToString:currentMatch])) {
+            ruleIx--;
+          } else if (mustMatch) {
+            // Didn't match, bail.
+            break;
+          }
+          matchView = [matchView superview];
+        }
+        if (ruleIx < 0) {
+          [matchingSelectors addObject:sd.fullScope];
+        }
       }
-      
-      NIDASSERT(nil != _ruleSets);
-      [_ruleSets setObject:ruleSet forKey:className];
     }
   }
-  
-  return ruleSet;
+
+  [self addRulesForSelectors:matchingSelectors toRuleset:ruleset];
+
+  if (shouldReturnDescription) {
+    NSMutableString *description = [NSMutableString new];
+    [matchingSelectors enumerateObjectsUsingBlock:^(NSString *selector, NSUInteger idx, BOOL *stop) {
+      [description appendFormat:@"   %@\n", selector];
+    }];
+    return description;
+  }
+
+  return nil;
 }
 
-- (NICSSRuleset *)rulesetForClassName:(NSString *)className {
-  NSArray* selectors = [_significantScopeToScopes objectForKey:className];
-  return [self addSelectors:selectors toRuleset:nil forClassName:className];
-}
-
+///////////////////////////////////////////////////////////////////////////////////////////////////
 - (NSSet *)dependencies {
   return [_rawRulesets objectForKey:kDependenciesSelectorKey];
 }
 
-+(Class)rulesetClass
-{
+///////////////////////////////////////////////////////////////////////////////////////////////////
++(Class)rulesetClass {
   return _rulesetClass ?: [NICSSRuleset class];
 }
 
-+(void)setRulesetClass:(Class)rulesetClass
-{
+///////////////////////////////////////////////////////////////////////////////////////////////////
++(void)setRulesetClass:(Class)rulesetClass {
   _rulesetClass = rulesetClass;
 }
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
++(id<NICSSResourceResolverDelegate>)resourceResolver {
+    return _resolver;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
++(void)setResourceResolver: (id<NICSSResourceResolverDelegate>) resolver {
+    _resolver = resolver;
+}
+
 
 @end

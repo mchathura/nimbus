@@ -100,6 +100,11 @@ typedef enum {
 - (void)willRotateToInterfaceOrientation:(UIInterfaceOrientation)toInterfaceOrientation duration:(NSTimeInterval)duration;
 - (void)willAnimateRotationToInterfaceOrientation:(UIInterfaceOrientation)toInterfaceOrientation duration:(NSTimeInterval)duration;
 
+#pragma mark Subclassing
+
+@property (nonatomic, readonly, NI_STRONG) UIScrollView* pagingScrollView;
+@property (nonatomic, readonly, copy) NSMutableSet* visiblePages; // Set of UIView<NIPagingScrollViewPage>*
+
 @end
 
 /**

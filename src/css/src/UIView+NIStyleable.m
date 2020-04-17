@@ -27,6 +27,8 @@
 #error "Nimbus requires ARC support."
 #endif
 
+const char niView_DOMSetKey = 0;
+
 NSString* const NICSSViewKey = @"view";
 NSString* const NICSSViewIdKey = @"id";
 NSString* const NICSSViewCssClassKey = @"cssClass";
@@ -36,6 +38,7 @@ NSString* const NICSSViewTargetSelectorKey = @"selector";
 NSString* const NICSSViewSubviewsKey = @"subviews";
 NSString* const NICSSViewAccessibilityLabelKey = @"label";
 NSString* const NICSSViewBackgroundColorKey = @"bg";
+NSString* const NICSSViewHiddenKey = @"hidden";
 
 /**
  * Private class for storing info during view creation
@@ -772,29 +775,63 @@ CGFloat NICSSUnitToPixels(NICSSUnit unit, CGFloat container)
 @implementation UIView (NIStyleablePrivate)
 -(void)_buildSubviews:(NSArray *)viewSpecs inDOM:(NIDOM *)dom withViewArray:(NSMutableArray *)subviews
 {
-  NIPrivateViewInfo *active = nil;
-	for (id directive in viewSpecs) {
+    NIPrivateViewInfo *active = [[NIPrivateViewInfo alloc] init];
+    active.view = self;
+    [subviews addObject:active];
+    for (id directive in viewSpecs) {
     
     if ([directive isKindOfClass:[NSDictionary class]]) {
       // Process the key value pairs rather than trying to determine intent
-      // from the type
-      NSDictionary *kv = (NSDictionary*) directive;
+      // from the type of an array of random objects
+
+      // We need a mutable copy so we can figure out if any custom values are left after we get ours out
+      NSMutableDictionary *kv = [(NSDictionary*) directive mutableCopy];
       if (!active) {
         NSAssert([kv objectForKey:NICSSViewKey], @"The first NSDictionary passed to build subviews must contain the NICSSViewKey");
       }
       id directiveValue = [kv objectForKey:NICSSViewKey];
       if (directiveValue) {
+        [kv removeObjectForKey:NICSSViewKey];
 #ifdef NI_DYNAMIC_VIEWS
-        // I have a dream that you can instantiate this whole thing from JSON.
-        // So the dictionary version endeavors to make NSString/NSNumber work for every directive
+        // Let's see if this is a UIView subclass. If NOT, let the normal string property handling take over
         if ([directiveValue isKindOfClass:[NSString class]]) {
-          directiveValue = [[NSClassFromString(directiveValue) alloc] init];
+          id classFromString = [[NSClassFromString(directiveValue) alloc] init];
+          if (classFromString) {
+            directiveValue = [[NSClassFromString(directiveValue) alloc] init];
+          }
+        }
+        // See if we support this property and if so, pass it the dictionary itself (optionally the DOM). This allows extensions
+        // of the parser for things like table rows. It's mainly in concert with the XML parser, otherwise the syntax would just be odd.
+        if ([directiveValue isKindOfClass:[NSString class]]) {
+          NSString *targetSelectorStr = [NSString stringWithFormat:@"set%@:inDOM:",directiveValue];
+          SEL targetSelector = NSSelectorFromString(targetSelectorStr);
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+          if (targetSelector && [self respondsToSelector:targetSelector])
+          {
+            [self performSelector:targetSelector withObject:viewSpecs withObject:dom];
+            return;
+          }
+#pragma clang diagnostic pop
+          
+          targetSelectorStr = [NSString stringWithFormat:@"set%@:",directiveValue];
+          targetSelector = NSSelectorFromString(targetSelectorStr);
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+          if (targetSelector && [self respondsToSelector:targetSelector])
+          {
+            [self performSelector:targetSelector withObject:viewSpecs];
+            return;
+          }
+#pragma clang diagnostic pop
         }
 #endif
         if ([directiveValue isKindOfClass:[UIView class]]) {
           active = [[NIPrivateViewInfo alloc] init];
           active.view = (UIView*) directiveValue;
-          [self addSubview:active.view];
+          if (self != active.view) {
+            [self addSubview:active.view];
+          }
           [subviews addObject: active];
         } else if (class_isMetaClass(object_getClass(directiveValue))) {
           active = [[NIPrivateViewInfo alloc] init];
@@ -808,6 +845,7 @@ CGFloat NICSSUnitToPixels(NICSSUnit unit, CGFloat container)
       }
       directiveValue = [kv objectForKey:NICSSViewIdKey];
       if (directiveValue) {
+        [kv removeObjectForKey:NICSSViewIdKey];
         NSAssert([directiveValue isKindOfClass:[NSString class]], @"The value of NICSSViewIdKey must be an NSString*");
         if (![directiveValue hasPrefix:@"#"]) {
           directiveValue = [@"#" stringByAppendingString:directiveValue];
@@ -816,16 +854,22 @@ CGFloat NICSSUnitToPixels(NICSSUnit unit, CGFloat container)
       }
       directiveValue = [kv objectForKey:NICSSViewCssClassKey];
       if (directiveValue) {
+        [kv removeObjectForKey:NICSSViewCssClassKey];
         NSAssert([directiveValue isKindOfClass:[NSString class]] || [directiveValue isKindOfClass:[NSArray class]], @"The value of NICSSViewCssClassKey must be an NSString* or NSArray*");
         active.cssClasses = active.cssClasses ?: [[NSMutableArray alloc] init];
         if ([directiveValue isKindOfClass:[NSString class]]) {
-          [active.cssClasses addObject:directiveValue];
+          if ([directiveValue rangeOfString:@" "].location != NSNotFound) {
+            [active.cssClasses addObjectsFromArray:[directiveValue componentsSeparatedByString:@" "]];
+          } else {
+            [active.cssClasses addObject:directiveValue];
+          }
         } else {
           [active.cssClasses addObjectsFromArray:directiveValue];
         }
       }
       directiveValue = [kv objectForKey:NICSSViewTextKey];
       if (directiveValue) {
+        [kv removeObjectForKey:NICSSViewTextKey];
         NSAssert([directiveValue isKindOfClass:[NSString class]] || [directiveValue isKindOfClass:[NIUserInterfaceString class]], @"The value of NICSSViewCssClassKey must be an NSString* or NIUserInterfaceString*");
         if ([directiveValue isKindOfClass:[NSString class]]) {
           directiveValue = [[NIUserInterfaceString alloc] initWithKey:directiveValue defaultValue:directiveValue];
@@ -836,20 +880,31 @@ CGFloat NICSSUnitToPixels(NICSSUnit unit, CGFloat container)
       }
       directiveValue = [kv objectForKey:NICSSViewBackgroundColorKey];
       if (directiveValue) {
-        NSAssert([directiveValue isKindOfClass:[UIColor class]] || [directiveValue isKindOfClass:[NSNumber class]], @"The value of NICSSViewBackgroundColorKey must be NSNumber* or UIColor*");
+        [kv removeObjectForKey:NICSSViewBackgroundColorKey];
+        NSAssert([directiveValue isKindOfClass:[UIColor class]] || [directiveValue isKindOfClass:[NSNumber class]] || [directiveValue isKindOfClass:[NSString class]], @"The value of NICSSViewBackgroundColorKey must be NSString*, NSNumber* or UIColor*");
         if ([directiveValue isKindOfClass:[NSNumber class]]) {
           long rgbValue = [directiveValue longValue];
           directiveValue = [UIColor colorWithRed:((float)((rgbValue & 0xFF000000) >> 24))/255.0 green:((float)((rgbValue & 0xFF0000) >> 16))/255.0 blue:((float)((rgbValue & 0xFF00) >> 8))/255.0 alpha:((float)(rgbValue & 0xFF))/255.0];
+        } else if ([directiveValue isKindOfClass:[NSString class]]) {
+          directiveValue = [NICSSRuleset colorFromString:directiveValue];
         }
-        self.backgroundColor = directiveValue;
+        active.view.backgroundColor = directiveValue;
+      }
+      directiveValue = [kv objectForKey:NICSSViewHiddenKey];
+      if (directiveValue) {
+        [kv removeObjectForKey:NICSSViewHiddenKey];
+        NSAssert([directiveValue isKindOfClass:[NSNumber class]] || [directiveValue isKindOfClass:[NSString class]], @"The value of NICSSViewHiddenKey must be NSString* or NSNumber*");
+        active.view.hidden = [directiveValue boolValue];
       }
       directiveValue = [kv objectForKey:NICSSViewTagKey];
       if (directiveValue) {
+        [kv removeObjectForKey:NICSSViewTagKey];
         NSAssert([directiveValue isKindOfClass:[NSNumber class]], @"The value of NICSSViewTagKey must be an NSNumber*");
         active.view.tag = [directiveValue integerValue];
       }
       directiveValue = [kv objectForKey:NICSSViewTargetSelectorKey];
       if (directiveValue) {
+        [kv removeObjectForKey:NICSSViewTargetSelectorKey];
         NSAssert([directiveValue isKindOfClass:[NSInvocation class]] || [directiveValue isKindOfClass:[NSString class]], @"NICSSViewTargetSelectorKey must be an NSInvocation*, or an NSString* if you're adventurous and NI_DYNAMIC_VIEWS is defined.");
         
 #ifdef NI_DYNAMIC_VIEWS
@@ -872,24 +927,36 @@ CGFloat NICSSUnitToPixels(NICSSUnit unit, CGFloat container)
         if ([directiveValue isKindOfClass:[NSInvocation class]]) {
           NSInvocation *n = (NSInvocation*) directiveValue;
           if ([active.view respondsToSelector:@selector(addTarget:action:forControlEvents:)]) {
-            [((id)active.view) addTarget:n.target action:n.selector forControlEvents:UIControlEventTouchUpInside];
+              if ([active.view isKindOfClass:[UIButton class]]) {
+                  [((id)active.view) addTarget: n.target action: n.selector forControlEvents: UIControlEventTouchUpInside];
+              } else {
+                  [((id)active.view) addTarget: n.target action: n.selector forControlEvents: UIControlEventEditingChanged];
+              }
           } else {
             NSString *error = [NSString stringWithFormat:@"Cannot apply NSInvocation to class %@", NSStringFromClass(active.class)];
             NSAssert(NO, error);
-            #pragma unused (error)
           }
         }
       }
       directiveValue = [kv objectForKey:NICSSViewSubviewsKey];
       if (directiveValue) {
+        [kv removeObjectForKey:NICSSViewSubviewsKey];
         NSAssert([directiveValue isKindOfClass: [NSArray class]], @"NICSSViewSubviewsKey must be an NSArray*");
         [active.view _buildSubviews:directiveValue inDOM:dom withViewArray:subviews];
-      } else if (directiveValue)
-        directiveValue = [kv objectForKey:NICSSViewAccessibilityLabelKey];
+      }
+      
+      directiveValue = [kv objectForKey:NICSSViewAccessibilityLabelKey];
       if (directiveValue) {
+        [kv removeObjectForKey:NICSSViewAccessibilityLabelKey];
         NSAssert([directiveValue isKindOfClass:[NSString class]], @"NICSSViewAccessibilityLabelKey must be an NSString*");
         active.view.accessibilityLabel = directiveValue;
       }
+      
+      if (kv.count) {
+        // The rest go to kv setters
+        NISetValuesForKeys(active.view, kv, nil);
+      }
+      
       continue;
     }
     
@@ -898,7 +965,9 @@ CGFloat NICSSUnitToPixels(NICSSUnit unit, CGFloat container)
     if ([directive isKindOfClass: [UIView class]]) {
       active = [[NIPrivateViewInfo alloc] init];
       active.view = (UIView*) directive;
-      [self addSubview:active.view];
+      if (self != directive) {
+        [self addSubview:active.view];
+      }
       [subviews addObject: active];
       continue;
     } else if (class_isMetaClass(object_getClass(directive))) {
@@ -936,17 +1005,21 @@ CGFloat NICSSUnitToPixels(NICSSUnit unit, CGFloat container)
     } else if ([directive isKindOfClass:[NSInvocation class]]) {
       NSInvocation *n = (NSInvocation*) directive;
       if ([active.view respondsToSelector:@selector(addTarget:action:forControlEvents:)]) {
-        [((id)active.view) addTarget: n.target action: n.selector forControlEvents: UIControlEventTouchUpInside];
+          if ([active.view isKindOfClass:[UIButton class]]) {
+              [((id)active.view) addTarget: n.target action: n.selector forControlEvents: UIControlEventTouchUpInside];
+          } else {
+              [((id)active.view) addTarget: n.target action: n.selector forControlEvents: UIControlEventEditingChanged];
+          }
       } else {
         NSString *error = [NSString stringWithFormat:@"Cannot apply NSInvocation to class %@", NSStringFromClass(active.class)];
         NSAssert(NO, error);
-        #pragma unused (error)
       }
     } else {
       NSAssert(NO, @"Unknown directive in build specifier");
     }
   }
 }
+
 @end
 
 @implementation NIPrivateViewInfo

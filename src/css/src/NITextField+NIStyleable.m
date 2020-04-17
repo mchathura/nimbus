@@ -1,6 +1,5 @@
 //
-// Copyright 2011-2014 NimbusKit
-// Originally written by Max Metral
+// Copyright 2011 Max Metral
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,12 +27,14 @@ NI_FIX_CATEGORY_BUG(NITextField_NIStyleable)
 
 @implementation NITextField (NIStyleable)
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
 - (void)applyStyleWithRuleSet:(NICSSRuleset *)ruleSet inDOM:(NIDOM *)dom {
     [self applyNITextFieldStyleBeforeViewWithRuleSet:ruleSet inDOM:dom];
     [self applyViewStyleWithRuleSet:ruleSet inDOM:dom];
     [self applyNITextFieldStyleWithRuleSet:ruleSet inDOM:dom];
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
 -(void)applyStyleWithRuleSet:(NICSSRuleset*)ruleSet forPseudoClass:(NSString *)pseudo inDOM:(NIDOM*)dom
 {
     if (ruleSet.hasFont) {
@@ -48,6 +49,7 @@ NI_FIX_CATEGORY_BUG(NITextField_NIStyleable)
     }
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
 -(void)applyNITextFieldStyleBeforeViewWithRuleSet:(NICSSRuleset*)ruleSet inDOM:(NIDOM*)dom
 {
     [self applyTextFieldStyleBeforeViewWithRuleSet:ruleSet inDOM:dom];
@@ -56,6 +58,7 @@ NI_FIX_CATEGORY_BUG(NITextField_NIStyleable)
     }
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
 -(void)applyNITextFieldStyleWithRuleSet:(NICSSRuleset*)ruleSet inDOM:(NIDOM*)dom
 {
     [self applyTextFieldStyleWithRuleSet:ruleSet inDOM:dom];

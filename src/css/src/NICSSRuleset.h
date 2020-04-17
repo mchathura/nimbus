@@ -41,6 +41,47 @@ typedef enum {
   NICSSButtonAdjustDisabled = 2
 } NICSSButtonAdjust;
 
+@interface NICSSRelativeSpec : NSObject
+@property (nonatomic, strong) NSString *viewSpec;
+@property (nonatomic) NICSSUnit margin;
+@end
+
+static NSString* const kTextColorKey = @"color";
+static NSString* const kHighlightedTextColorKey = @"-ios-highlighted-color";
+static NSString* const kTextAlignmentKey = @"text-align";
+static NSString* const kFontKey = @"font";
+static NSString* const kFontSizeKey = @"font-size";
+static NSString* const kFontStyleKey = @"font-style";
+static NSString* const kFontWeightKey = @"font-weight";
+static NSString* const kFontFamilyKey = @"font-family";
+static NSString* const kTextShadowKey = @"text-shadow";
+static NSString* const kLineBreakModeKey = @"-ios-line-break-mode";
+static NSString* const kNumberOfLinesKey = @"-ios-number-of-lines";
+static NSString* const kMinimumFontSizeKey = @"-ios-minimum-font-size";
+static NSString* const kAdjustsFontSizeKey = @"-ios-adjusts-font-size";
+static NSString* const kBaselineAdjustmentKey = @"-ios-baseline-adjustment";
+static NSString* const kOpacityKey = @"opacity";
+static NSString* const kBackgroundColorKey = @"background-color";
+static NSString* const kBorderRadiusKey = @"border-radius";
+static NSString* const kBorderKey = @"border";
+static NSString* const kBorderColorKey = @"border-color";
+static NSString* const kBorderWidthKey = @"border-width";
+static NSString* const kTintColorKey = @"-ios-tint-color";
+static NSString* const kActivityIndicatorStyleKey = @"-ios-activity-indicator-style";
+static NSString* const kAutoresizingKey = @"-ios-autoresizing";
+static NSString* const kTableViewCellSeparatorStyleKey = @"-ios-table-view-cell-separator-style";
+static NSString* const kScrollViewIndicatorStyleKey = @"-ios-scroll-view-indicator-style";
+static NSString* const kPaddingKey = @"padding";
+static NSString* const kHPaddingKey = @"-mobile-hpadding";
+static NSString* const kVPaddingKey = @"-mobile-vpadding";
+
+// IF YOU ADD A CSS KEY - go add it to knownKeys in the +initialize method
+// so that we can warn when there are unknown values
+static NSSet* sKnownKeys = nil;
+
+// This color table is generated on-demand and is released when a memory warning is encountered.
+static NSDictionary* sColorTable = nil;
+
 /**
  * A simple translator from raw CSS rulesets to Objective-C values.
  *
@@ -51,7 +92,6 @@ typedef enum {
  * are removed from every stylesheet.
  */
 @interface NICSSRuleset : NSObject {
-@private
   NSMutableDictionary* _ruleset;
   
   UIColor* _textColor;
@@ -103,6 +143,18 @@ typedef enum {
   NICSSUnit _minWidth;
   NICSSUnit _maxHeight;
   NICSSUnit _maxWidth;
+    
+  NICSSRelativeSpec* _leftOf;
+  NICSSRelativeSpec* _rightOf;
+  NICSSRelativeSpec* _above;
+  NICSSRelativeSpec* _below;
+  
+  UIReturnKeyType _returnKeyType;
+  UIKeyboardType _keyboardType;
+  UITextAutocorrectionType _autocorrectionType;
+  UITextAutocapitalizationType _autocapitalizationType;
+  BOOL _clipsToBounds;
+  UIAccessibilityTraits _accessibilityTraits;
   
   union {
     struct {
@@ -155,16 +207,40 @@ typedef enum {
       int MinHeight: 1;
       int MaxWidth: 1;
       int MaxHeight: 1;
+      int LeftOf: 1;
+      int RightOf: 1;
+      int Above: 1;
+      int Below: 1;
       // 48
       int TextKey: 1;
       int ButtonAdjust: 1;
       int HorizontalPadding: 1;
       int VerticalPadding: 1;
+      int ReturnKeyType: 1;
+      int KeyboardType: 1;
+      int AutocorrectionType: 1;
+      int AutocapitalizationType: 1;
+      int ClipsToBounds: 1;
+      int AccessibilityTraits: 1;
     } cached;
     int64_t _data;
   } _is;
 }
 
+/**
+ * Initialize and reduce memory on a memory warning notification. If you init without calling this method
+ * then you should call reduceMemory when you receive a memory warning.
+ */
+- (id)initAndRegisterForMemoryWarnings;
+- (void)reduceMemory;
+
++ (UIColor*) colorFromString: (NSString*) colorValue;
+/**
+ * Returns a set of known CSS property values, such as margin, font, etc.
+ */
++ (NSSet*) knownCssProperties;
+
+- (void)reset;
 - (void)addEntriesFromDictionary:(NSDictionary *)dictionary;
 - (id)cssRuleForKey: (NSString*)key;
 
@@ -320,6 +396,24 @@ typedef enum {
 
 - (BOOL) hasVerticalPadding;
 - (NICSSUnit) verticalPadding; // padding or -mobile-vPadding
+
+- (BOOL) hasReturnKeyType;
+- (UIReturnKeyType) returnKeyType;
+
+- (BOOL) hasKeyboardType;
+- (UIKeyboardType) keyboardType;
+
+- (BOOL) hasAutocorrectionType;
+- (UITextAutocorrectionType) autocorrectionType;
+
+- (BOOL) hasAutocapitalizationType;
+- (UITextAutocapitalizationType) autocapitalizationType;
+
+- (BOOL) hasClipsToBounds;
+- (BOOL) clipsToBounds;
+
+- (BOOL) hasAccessibilityTraits;
+- (UIAccessibilityTraits) accessibilityTraits;
 @end
 
 /**

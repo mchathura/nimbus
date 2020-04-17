@@ -30,22 +30,34 @@ const NSInteger NIPagingScrollViewUnknownNumberOfPages = -1;
 const CGFloat NIPagingScrollViewDefaultPageMargin = 10;
 const CGFloat NIPagingScrollViewDefaultPageInset = 0;
 
-@implementation NIPagingScrollView {
+@interface NIPagingScrollView()  {
+@private
   NIViewRecycler* _viewRecycler;
-  UIScrollView* _scrollView;
-
   NSMutableSet* _visiblePages;
 
-  // Animating to Pages
+  // State Information
+  NSInteger _firstVisiblePageIndexBeforeRotation;
+  CGFloat _percentScrolledIntoFirstVisiblePage;
   NSInteger _animatingToPageIndex;
   BOOL _isKillingAnimation;
   NSInteger _queuedAnimationPageIndex;
   BOOL _shouldUpdateVisiblePagesWhileScrolling;
-
-  // Rotation State
-  NSInteger _firstVisiblePageIndexBeforeRotation;
-  CGFloat _percentScrolledIntoFirstVisiblePage;
 }
+
+@property (nonatomic, NI_STRONG) UIScrollView* pagingScrollView;
+
+@end
+
+@implementation NIPagingScrollView
+
+  @synthesize visiblePages = _visiblePages;
+  @synthesize pagingScrollView = _pagingScrollView;
+  @synthesize pageMargin = _pageMargin;
+  @synthesize dataSource = _dataSource;
+  @synthesize delegate = _delegate;
+  @synthesize centerPageIndex = _centerPageIndex;
+  @synthesize numberOfPages = _numberOfPages;
+  @synthesize type = _type;
 
 - (void)commonInit {
   // Default state.
@@ -62,29 +74,24 @@ const CGFloat NIPagingScrollViewDefaultPageInset = 0;
 
   _viewRecycler = [[NIViewRecycler alloc] init];
 
-  // The internal scroll view that powers this paging scroll view.
-  _scrollView = [[UIScrollView alloc] initWithFrame:self.bounds];
-  _scrollView.pagingEnabled = YES;
-  _scrollView.scrollsToTop = NO;
+  self.pagingScrollView = [[UIScrollView alloc] initWithFrame:self.bounds];
+  self.pagingScrollView.pagingEnabled = YES;
+  self.pagingScrollView.scrollsToTop = NO;
 
-  // Allows the scroll view to show adjacent pages...
-  _scrollView.clipsToBounds = NO;
-  // ...while still clipping contents to the bounds of the paging scroll view.
-  self.clipsToBounds = YES;
+  self.pagingScrollView.autoresizingMask = (UIViewAutoresizingFlexibleWidth
+                                            | UIViewAutoresizingFlexibleHeight);
 
-  _scrollView.autoresizingMask = UIViewAutoresizingFlexibleDimensions;
+  self.pagingScrollView.delegate = self;
 
-  _scrollView.delegate = self;
+  self.pagingScrollView.showsVerticalScrollIndicator = NO;
+  self.pagingScrollView.showsHorizontalScrollIndicator = NO;
 
-  _scrollView.showsVerticalScrollIndicator = NO;
-  _scrollView.showsHorizontalScrollIndicator = NO;
+  [self addSubview:self.pagingScrollView];
 
   if ([[UIView class]
           respondsToSelector:@selector(userInterfaceLayoutDirectionForSemanticContentAttribute:)] && [self respondsToSelector:@selector(semanticContentAttribute)] && [UIView userInterfaceLayoutDirectionForSemanticContentAttribute:self.semanticContentAttribute] == UIUserInterfaceLayoutDirectionRightToLeft) {
     [self setRTLEnabled:YES];
   }
-
-  [self addSubview:_scrollView];
 }
 
 - (id)initWithFrame:(CGRect)frame {
@@ -105,13 +112,13 @@ const CGFloat NIPagingScrollViewDefaultPageInset = 0;
 
 - (void)layoutSubviews {
   [super layoutSubviews];
-  _scrollView.frame = [self frameForPagingScrollView];
+  self.pagingScrollView.frame = [self frameForPagingScrollView];
 
   // Retain the current position.
   CGPoint offset = [self frameForPageAtIndex:_centerPageIndex].origin;
-  _scrollView.contentOffset = [self contentOffsetFromPageOffset:offset];
+  self.pagingScrollView.contentOffset = [self contentOffsetFromPageOffset:offset];
 
-  _scrollView.contentSize = [self contentSizeForPagingScrollView];
+  self.pagingScrollView.contentSize = [self contentSizeForPagingScrollView];
   [self layoutVisiblePages];
 }
 
@@ -139,7 +146,7 @@ const CGFloat NIPagingScrollViewDefaultPageInset = 0;
   // portrait because the pagingScrollView is the root view controller's view, so its
   // frame is in window coordinate space, which is never rotated. Its bounds, however,
   // will be in landscape because it has a rotation transform applied.
-  CGRect bounds = _scrollView.bounds;
+  CGRect bounds = self.pagingScrollView.bounds;
   CGRect pageFrame = bounds;
 
   if (NIPagingScrollViewHorizontal == self.type) {
@@ -159,7 +166,7 @@ const CGFloat NIPagingScrollViewDefaultPageInset = 0;
 - (CGSize)contentSizeForPagingScrollView {
   // We use the paging scroll view's bounds to calculate the contentSize, for the same reason
   // outlined above.
-  CGRect bounds = _scrollView.bounds;
+  CGRect bounds = self.pagingScrollView.bounds;
   if (NIPagingScrollViewHorizontal == self.type) {
     return CGSizeMake(bounds.size.width * self.numberOfPages, bounds.size.height);
 
@@ -183,10 +190,10 @@ const CGFloat NIPagingScrollViewDefaultPageInset = 0;
 
 - (CGFloat)pageScrollableDimension {
   if (NIPagingScrollViewHorizontal == self.type) {
-    return _scrollView.bounds.size.width;
+    return self.pagingScrollView.bounds.size.width;
 
   } else if (NIPagingScrollViewVertical == self.type) {
-    return _scrollView.bounds.size.height;
+    return self.pagingScrollView.bounds.size.height;
   }
 
   return 0;
@@ -205,10 +212,10 @@ const CGFloat NIPagingScrollViewDefaultPageInset = 0;
 
 - (CGFloat)scrolledPageOffset {
   if (NIPagingScrollViewHorizontal == self.type) {
-    return _scrollView.contentOffset.x;
+    return self.pagingScrollView.contentOffset.x;
 
   } else if (NIPagingScrollViewVertical == self.type) {
-    return _scrollView.contentOffset.y;
+    return self.pagingScrollView.contentOffset.y;
   }
 
   return 0;
@@ -232,8 +239,8 @@ const CGFloat NIPagingScrollViewDefaultPageInset = 0;
 }
 
 - (NSInteger)currentVisiblePageIndex {
-  CGPoint contentOffset = _scrollView.contentOffset;
-  CGSize boundsSize = _scrollView.bounds.size;
+    CGPoint contentOffset = _pagingScrollView.contentOffset;
+  CGSize boundsSize = self.pagingScrollView.bounds.size;
 
   if (NIPagingScrollViewHorizontal == self.type) {
     // Whatever image is currently displayed in the center of the screen is the currently
@@ -258,7 +265,7 @@ const CGFloat NIPagingScrollViewDefaultPageInset = 0;
 
   NSInteger visibleRange = 1;
   if (_pageInset != 0) {
-    CGSize boundsSize = _scrollView.bounds.size;
+    CGSize boundsSize = self.pagingScrollView.bounds.size;
     CGSize frameSize = self.frame.size;
     visibleRange = (NSInteger)ceil(frameSize.width / (boundsSize.width + _pageMargin));
   }
@@ -335,7 +342,7 @@ const CGFloat NIPagingScrollViewDefaultPageInset = 0;
     [self concatInvertXTransformation:page];
   }
 
-  [_scrollView addSubview:page];
+  [self.pagingScrollView addSubview:page];
   [_visiblePages addObject:page];
 }
 
@@ -445,7 +452,7 @@ const CGFloat NIPagingScrollViewDefaultPageInset = 0;
   // during which we do not want to modify the visible pages because this is handled elsewhere.
   [super setFrame:frame];
 
-  _scrollView.contentSize = [self contentSizeForPagingScrollView];
+  self.pagingScrollView.contentSize = [self contentSizeForPagingScrollView];
   [self layoutVisiblePages];
 }
 
@@ -454,7 +461,7 @@ const CGFloat NIPagingScrollViewDefaultPageInset = 0;
   // We must forward hits for the scrollView or else the smaller frame when
   // it is inset will prevent touches outside the scrollView bounds.
   if (view == self) {
-    return _scrollView;
+    return self.pagingScrollView;
   }
   return view;
 }
@@ -489,7 +496,7 @@ const CGFloat NIPagingScrollViewDefaultPageInset = 0;
     // The content size is calculated based on the number of pages and the scroll view frame.
     CGPoint offset = [self frameForPageAtIndex:_centerPageIndex].origin;
     offset = [self contentOffsetFromPageOffset:offset];
-    _scrollView.contentOffset = offset;
+    self.pagingScrollView.contentOffset = offset;
   }
 }
 
@@ -601,8 +608,8 @@ const CGFloat NIPagingScrollViewDefaultPageInset = 0;
 
   // If there is no data source then we can't do anything particularly interesting.
   if (nil == _dataSource) {
-    _scrollView.contentSize = self.bounds.size;
-    _scrollView.contentOffset = CGPointZero;
+    self.pagingScrollView.contentSize = self.bounds.size;
+    self.pagingScrollView.contentOffset = CGPointZero;
 
     // May as well just get rid of all the views then.
     [_viewRecycler removeAllViews];
@@ -614,8 +621,8 @@ const CGFloat NIPagingScrollViewDefaultPageInset = 0;
 
   // Cache the number of pages.
   _numberOfPages = [_dataSource numberOfPagesInPagingScrollView:self];
-  _scrollView.frame = [self frameForPagingScrollView];
-  _scrollView.contentSize = [self contentSizeForPagingScrollView];
+  self.pagingScrollView.frame = [self frameForPagingScrollView];
+  self.pagingScrollView.contentSize = [self contentSizeForPagingScrollView];
 
   [self didReloadNumberOfPages];
 
@@ -623,11 +630,11 @@ const CGFloat NIPagingScrollViewDefaultPageInset = 0;
   if (oldCenterPageIndex >= 0) {
     _centerPageIndex = NIBoundi(_centerPageIndex, 0, self.numberOfPages - 1);
 
-    if (![_scrollView isTracking] && ![_scrollView isDragging]) {
+    if (![self.pagingScrollView isTracking] && ![self.pagingScrollView isDragging]) {
       // The content size is calculated based on the number of pages and the scroll view frame.
       CGPoint offset = [self frameForPageAtIndex:_centerPageIndex].origin;
       offset = [self contentOffsetFromPageOffset:offset];
-      _scrollView.contentOffset = offset;
+      self.pagingScrollView.contentOffset = offset;
 
       _isKillingAnimation = YES;
     }
@@ -666,7 +673,7 @@ const CGFloat NIPagingScrollViewDefaultPageInset = 0;
 - (void)willAnimateRotationToInterfaceOrientation: (UIInterfaceOrientation)toInterfaceOrientation
                                          duration: (NSTimeInterval)duration {
   // Recalculate contentSize based on current orientation.
-  _scrollView.contentSize = [self contentSizeForPagingScrollView];
+  self.pagingScrollView.contentSize = [self contentSizeForPagingScrollView];
 
   [self layoutVisiblePages];
 
@@ -674,7 +681,7 @@ const CGFloat NIPagingScrollViewDefaultPageInset = 0;
   CGFloat pageScrollableDimension = [self pageScrollableDimension];
   CGFloat newOffset = ((_firstVisiblePageIndexBeforeRotation * pageScrollableDimension)
                        + (_percentScrolledIntoFirstVisiblePage * pageScrollableDimension));
-  _scrollView.contentOffset = [self contentOffsetFromOffset:newOffset];
+  self.pagingScrollView.contentOffset = [self contentOffsetFromOffset:newOffset];
 }
 
 - (BOOL)hasNext {
@@ -698,7 +705,7 @@ const CGFloat NIPagingScrollViewDefaultPageInset = 0;
   CGPoint offset = [self frameForPageAtIndex:pageIndex].origin;
   offset = [self contentOffsetFromPageOffset:offset];
 
-  _scrollView.contentOffset = offset;
+  self.pagingScrollView.contentOffset = offset;
 
   [self updateVisiblePagesShouldNotifyDelegate:YES];
 }
@@ -721,12 +728,12 @@ const CGFloat NIPagingScrollViewDefaultPageInset = 0;
   offset = [self contentOffsetFromPageOffset:offset];
 
   // The paging scroll view won't actually animate if the offsets are identical.
-  animated = animated && !CGPointEqualToPoint(offset, _scrollView.contentOffset);
+  animated = animated && !CGPointEqualToPoint(offset, self.pagingScrollView.contentOffset);
 
   if (animated) {
     _animatingToPageIndex = pageIndex;
   }
-  [_scrollView setContentOffset:offset animated:animated];
+  [self.pagingScrollView setContentOffset:offset animated:animated];
   if (!animated) {
     [self resetSurroundingPages];
     [self didAnimateToPage:pageIndex];
@@ -776,20 +783,20 @@ const CGFloat NIPagingScrollViewDefaultPageInset = 0;
 - (void)setType:(NIPagingScrollViewType)type {
   if (_type != type) {
     _type = type;
-    _scrollView.scrollsToTop = (type == NIPagingScrollViewVertical);
+    self.pagingScrollView.scrollsToTop = (type == NIPagingScrollViewVertical);
   }
 }
 
 - (void)setRTLEnabled:(BOOL)RTLEnabled {
   // Apply the transformation only if the state is changing.
   if (!_RTLEnabled != !RTLEnabled) {
-    [self concatInvertXTransformation:_scrollView];
+    [self concatInvertXTransformation:self.pagingScrollView];
   }
   _RTLEnabled = RTLEnabled;
 }
 
 - (UIScrollView *)scrollView {
-  return _scrollView;
+  return self.pagingScrollView;
 }
 
 - (NSMutableSet *)visiblePages {

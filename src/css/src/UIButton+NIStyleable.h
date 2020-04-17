@@ -1,5 +1,5 @@
 //
-// Copyright 2011-2014 NimbusKit
+// Copyright 2011 Jeff Verkoeyen
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,32 +20,6 @@
 @class NIDOM;
 
 @interface UIButton (NIStyleable)
-
-/**
- * Applies the given rule set to this button. Call applyButtonStyleWithRuleSet:inDOM:
- *
- * This method is exposed primarily for subclasses to use when implementing the
- * applyStyleWithRuleSet: method from NIStyleable.
- */
-- (void)applyButtonStyleWithRuleSet:(NICSSRuleset *)ruleSet DEPRECATED_ATTRIBUTE;
-
-/**
- * Applies the given rule set to this button.
- *
- * This method is exposed primarily for subclasses to use when implementing the
- * applyStyleWithRuleSet: method from NIStyleable.
- */
-- (void)applyButtonStyleWithRuleSet:(NICSSRuleset *)ruleSet inDOM: (NIDOM*) dom;
-
-/**
- * Applies the given rule set to this label.
- *
- * This method is exposed primarily for subclasses to use when implementing the
- * applyStyleWithRuleSet: method from NIStyleable. Since some of the view
- * styles (e.g. positioning) may rely on some label elements (like text), this is called
- * before the view styling is done.
- */
-- (void)applyButtonStyleBeforeViewWithRuleSet:(NICSSRuleset *)ruleSet inDOM: (NIDOM*) dom;
 
 /**
  * Tells the CSS engine a set of pseudo classes that apply to views of this class.

@@ -19,6 +19,8 @@
 @class NICSSRuleset;
 @class NIDOM;
 
+extern const char niView_DOMSetKey;
+
 extern NSString* const NICSSViewKey;
 extern NSString* const NICSSViewIdKey;
 extern NSString* const NICSSViewCssClassKey;
@@ -28,6 +30,7 @@ extern NSString* const NICSSViewTargetSelectorKey;
 extern NSString* const NICSSViewSubviewsKey;
 extern NSString* const NICSSViewAccessibilityLabelKey;
 extern NSString* const NICSSViewBackgroundColorKey;
+extern NSString* const NICSSViewHiddenKey; // hidden
 
 @interface UIView (NIStyleable)
 

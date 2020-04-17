@@ -21,7 +21,7 @@
 #import "NimbusCore.h"
 #import "AFNetworking.h"
 #import "NIImageProcessing.h"
-#import "NIImageResponseSerializer.h"
+#import <AFNetworking/AFImageDownloader.h>
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "Nimbus requires ARC support."
@@ -257,6 +257,7 @@
                      cropRect: CGRectZero];
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
 - (void)setPathToNetworkImage:(NSString *)pathToNetworkImage forDisplaySize:(CGSize)displaySize contentMode:(UIViewContentMode)contentMode cropRect:(CGRect)cropRect {
   [self cancelOperation];
 
@@ -270,7 +271,7 @@
 
     } else {
       // Otherwise we assume it's a regular URL.
-      url = [NSURL URLWithString:[pathToNetworkImage stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding]];
+      url = [NSURL URLWithString:pathToNetworkImage];
     }
 
     // If the URL failed to be created, there's not much we can do here.
@@ -295,7 +296,6 @@
     if (nil != self.imageMemoryCache) {
       cacheKey = [self cacheKeyForCacheIdentifier:pathToNetworkImage
                                         imageSize:displaySize
-                                         cropRect:cropRect
                                       contentMode:contentMode
                                      scaleOptions:self.scaleOptions];
       image = [self.imageMemoryCache objectWithName:cacheKey];
@@ -312,65 +312,95 @@
       [self networkImageViewDidLoadImage:image];
 
     } else {
-      if (!self.sizeForDisplay) {
-        displaySize = CGSizeZero;
-        contentMode = UIViewContentModeScaleToFill;
-      }
+        if (!self.sizeForDisplay) {
+            displaySize = CGSizeZero;
+            contentMode = UIViewContentModeScaleToFill;
+        }
 
-      NIImageResponseSerializer* serializer = [NIImageResponseSerializer serializer];
-      // We handle image scaling ourselves in the image processing method, so we need to disable
-      // AFNetworking from doing so as well.
-      serializer.imageScale = 1;
-      serializer.contentMode = contentMode;
-      serializer.cropRect = cropRect;
-      serializer.displaySize = displaySize;
-      serializer.scaleOptions = self.scaleOptions;
-      serializer.interpolationQuality = self.interpolationQuality;
+        [[AFImageDownloader defaultInstance] downloadImageForURLRequest:[NSURLRequest requestWithURL:url] success:^(NSURLRequest * _Nonnull request, NSHTTPURLResponse * _Nullable response, UIImage * _Nonnull responseObject) {
+                [self _didFinishLoadingWithImage:responseObject
+                                 cacheIdentifier:pathToNetworkImage
+                                     displaySize:displaySize
+                                     contentMode:contentMode
+                                    scaleOptions:self.scaleOptions
+                                  expirationDate:nil];
+            } failure:^(NSURLRequest * _Nonnull request, NSHTTPURLResponse * _Nullable response, NSError * _Nonnull error) {
+                [self _didFailToLoadWithError:error];
+        }];
 
-      NSString* originalCacheKey = [self cacheKeyForCacheIdentifier:pathToNetworkImage
-                                                          imageSize:displaySize
-                                                           cropRect:cropRect
-                                                        contentMode:contentMode
-                                                       scaleOptions:self.scaleOptions];
-
-      self.httpSessionManager = [AFHTTPSessionManager manager];
-      self.httpSessionManager.responseSerializer = serializer;
-      [self.httpSessionManager GET:url.absoluteString
-        parameters:nil
-          progress:^(NSProgress * _Nonnull downloadProgress) {
-            if ([self.delegate respondsToSelector:@selector(networkImageView:readBytes:totalBytes:)]) {
-              [self.delegate networkImageView:self
-                                    readBytes:downloadProgress.completedUnitCount
-                                   totalBytes:downloadProgress.totalUnitCount];
-            }
-          }
-           success:^(NSURLSessionDataTask * _Nonnull task, id  _Nullable responseObject) {
-             NSString* blockCacheKey = [self cacheKeyForCacheIdentifier:pathToNetworkImage
-                                                              imageSize:displaySize
-                                                               cropRect:cropRect
-                                                            contentMode:contentMode
-                                                           scaleOptions:self.scaleOptions];
-
-             // Only keep this result if it's for the most recent request.
-             if ([blockCacheKey isEqualToString:originalCacheKey]) {
-               [self _didFinishLoadingWithImage:responseObject
-                                cacheIdentifier:pathToNetworkImage
-                                    displaySize:displaySize
-                                       cropRect:cropRect
-                                    contentMode:contentMode
-                                   scaleOptions:self.scaleOptions
-                                 expirationDate:[self expirationDate]];
-             }
-
-           } failure:^(NSURLSessionDataTask * _Nullable task, NSError * _Nonnull error) {
-             [self _didFailToLoadWithError:error];
-           }];
-
-      [self _didStartLoading];
+        [self _didStartLoading];
     }
   }
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
+- (void)_didFinishLoadingWithImage: (UIImage *)image
+                   cacheIdentifier: (NSString *)cacheIdentifier
+                       displaySize: (CGSize)displaySize
+                       contentMode: (UIViewContentMode)contentMode
+                      scaleOptions: (NINetworkImageViewScaleOptions)scaleOptions
+                    expirationDate: (NSDate *)expirationDate {
+  // Store the result image in the memory cache.
+  if (nil != self.imageMemoryCache && nil != image) {
+    NSString* cacheKey = [self cacheKeyForCacheIdentifier:cacheIdentifier
+                                                imageSize:displaySize
+                                              contentMode:contentMode
+                                             scaleOptions:scaleOptions];
+
+    // Store the image in the memory cache, possibly with an expiration date.
+    [self.imageMemoryCache storeObject: image
+                              withName: cacheKey
+                          expiresAfter: expirationDate];
+  }
+
+  if (nil != image) {
+    // Display the new image.
+    [self setImage:image];
+
+  } else {
+    [self setImage:self.initialImage];
+  }
+
+  self.operation = nil;
+
+  if ([self.delegate respondsToSelector:@selector(networkImageView:didLoadImage:)]) {
+    [self.delegate networkImageView:self didLoadImage:self.image];
+  }
+
+  [self networkImageViewDidLoadImage:image];
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+- (NSString *)cacheKeyForCacheIdentifier:(NSString *)cacheIdentifier
+                               imageSize:(CGSize)imageSize
+                             contentMode:(UIViewContentMode)contentMode
+                            scaleOptions:(NINetworkImageViewScaleOptions)scaleOptions {
+  NIDASSERT(NIIsStringWithAnyText(cacheIdentifier));
+
+  NSString* cacheKey = cacheIdentifier;
+
+  // Append the size to the key. This allows us to differentiate cache keys by image dimension.
+  // If the display size ever changes, we want to ensure that we're fetching the correct image
+  // from the cache.
+  if (self.sizeForDisplay) {
+    cacheKey = [cacheKey stringByAppendingFormat:@"%@{%d,%d}",
+                NSStringFromCGSize(imageSize), (int)contentMode, scaleOptions];
+  }
+
+  // The resulting cache key will look like:
+  // /path/to/image({width,height}{contentMode,cropImageForDisplay})
+
+  return cacheKey;
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
 - (void)setNetworkImageOperation:(NIOperation<NINetworkImageOperation> *)operation forDisplaySize:(CGSize)displaySize contentMode:(UIViewContentMode)contentMode cropRect:(CGRect)cropRect {
   [self cancelOperation];
 
